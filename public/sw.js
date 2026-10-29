@@ -1,12 +1,10 @@
-const CACHE_NAME = 'gtavc-app-v4';
+const CACHE_NAME = 'gtavc-app-v5';
 const OPFS_MARKER = '_game_ready';
 
-// Core static files cached on installation
+// Explicitly list all critical app files so they are cached during SW installation
 const PRECACHE_ASSETS = [
     '/',
     '/index.html',
-    './',
-    './index.html',
     '/manifest.json'
 ];
 
@@ -39,33 +37,22 @@ const CONTENT_TYPES = new Map([
     ['.bin', 'application/octet-stream'],
 ]);
 
-// 1. Install Event: Cache app shell
 self.addEventListener('install', (event) => {
     event.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => {
-            return cache.addAll(PRECACHE_ASSETS);
-        })
+        caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_ASSETS))
     );
     self.skipWaiting();
 });
 
-// 2. Activate Event: Clean old caches and claim clients
 self.addEventListener('activate', (event) => {
     event.waitUntil(
-        caches.keys().then((keys) => {
-            return Promise.all(
-                keys.map((key) => {
-                    if (key !== CACHE_NAME) {
-                        return caches.delete(key);
-                    }
-                })
-            );
-        })
+        caches.keys().then((keys) => 
+            Promise.all(keys.map((key) => key !== CACHE_NAME && caches.delete(key)))
+        )
     );
     self.clients.claim();
 });
 
-// Helper: Attach Cross-Origin Isolation headers required for WASM on iOS
 function withIsolationHeaders(response) {
     if (!response || response.status === 0) return response;
 
@@ -80,34 +67,27 @@ function withIsolationHeaders(response) {
     });
 }
 
-// 3. Fetch Event: Serve cached assets, OPFS game data, or network fallbacks
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
     let path = url.pathname;
 
-    // Normalize root path to index.html for offline navigation
-    if (path === '/') {
-        path = '/index.html';
-    }
-
-    // A. Serve imported game assets from OPFS
+    // 1. Serve OPFS game assets
     if ((path.startsWith('/vcsky/') || path.startsWith('/vcbr/')) &&
         (event.request.method === 'GET' || event.request.method === 'HEAD')) {
         event.respondWith(serveFromOPFS(event.request, path));
         return;
     }
 
-    // B. Handle origin requests (HTML, JS, WASM, CSS)
+    // 2. Intercept same-origin requests
     if (event.request.method === 'GET' && url.origin === self.location.origin) {
         event.respondWith(
             caches.open(CACHE_NAME).then(async (cache) => {
-                // Try serving from Cache Storage first
+                // Check if already in cache
                 const cachedResponse = await cache.match(event.request) || await cache.match(path);
                 if (cachedResponse) {
                     return withIsolationHeaders(cachedResponse);
                 }
 
-                // If not cached, fetch from network and store in Cache Storage
                 try {
                     const networkResponse = await fetch(event.request);
                     if (networkResponse.status === 200) {
@@ -115,12 +95,14 @@ self.addEventListener('fetch', (event) => {
                     }
                     return withIsolationHeaders(networkResponse);
                 } catch (error) {
-                    // Fallback to cached index.html for offline navigations
-                    const fallbackIndex = await cache.match('/index.html') || await cache.match('./index.html');
-                    if (fallbackIndex) {
-                        return withIsolationHeaders(fallbackIndex);
+                    // CRITICAL FIX: Only fallback to index.html for page navigations, NOT for .wasm/scripts
+                    if (event.request.mode === 'navigate') {
+                        const fallbackIndex = await cache.match('/index.html') || await cache.match('./index.html');
+                        if (fallbackIndex) {
+                            return withIsolationHeaders(fallbackIndex);
+                        }
                     }
-                    return new Response('Offline resource not available', { status: 503 });
+                    return new Response('Asset not found offline', { status: 404 });
                 }
             })
         );
@@ -129,7 +111,7 @@ self.addEventListener('fetch', (event) => {
 
 function getContentType(filename) {
     const lower = filename.toLowerCase();
-    if (lower.endsWith('.wasm.br')) return 'application/wasm';
+    if (lower.endsWith('.wasm.br') || lower.endsWith('.wasm')) return 'application/wasm';
     if (lower.endsWith('.js.br')) return 'application/javascript';
     if (lower.endsWith('.json.br')) return 'application/json';
     if (lower.endsWith('.css.br')) return 'text/css; charset=utf-8';
