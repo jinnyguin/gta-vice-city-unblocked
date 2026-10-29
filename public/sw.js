@@ -1,12 +1,13 @@
-const CACHE_NAME = 'gtavc-app-v3';
+const CACHE_NAME = 'gtavc-app-v4';
 const OPFS_MARKER = '_game_ready';
 
-// List of core engine files to cache immediately upon installation
+// Core static files cached on installation
 const PRECACHE_ASSETS = [
+    '/',
+    '/index.html',
     './',
     './index.html',
-    './manifest.json'
-    // Add any specific core .js or .wasm file paths here if known
+    '/manifest.json'
 ];
 
 const CONTENT_TYPES = new Map([
@@ -38,7 +39,7 @@ const CONTENT_TYPES = new Map([
     ['.bin', 'application/octet-stream'],
 ]);
 
-// 1. Install Event: Force caching of initial shell
+// 1. Install Event: Cache app shell
 self.addEventListener('install', (event) => {
     event.waitUntil(
         caches.open(CACHE_NAME).then((cache) => {
@@ -48,6 +49,7 @@ self.addEventListener('install', (event) => {
     self.skipWaiting();
 });
 
+// 2. Activate Event: Clean old caches and claim clients
 self.addEventListener('activate', (event) => {
     event.waitUntil(
         caches.keys().then((keys) => {
@@ -63,7 +65,7 @@ self.addEventListener('activate', (event) => {
     self.clients.claim();
 });
 
-// Helper to attach Cross-Origin isolation headers required for WASM / SharedArrayBuffer on iOS
+// Helper: Attach Cross-Origin Isolation headers required for WASM on iOS
 function withIsolationHeaders(response) {
     if (!response || response.status === 0) return response;
 
@@ -78,28 +80,34 @@ function withIsolationHeaders(response) {
     });
 }
 
+// 3. Fetch Event: Serve cached assets, OPFS game data, or network fallbacks
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
-    const path = url.pathname;
+    let path = url.pathname;
 
-    // A. Serve imported game data from OPFS
+    // Normalize root path to index.html for offline navigation
+    if (path === '/') {
+        path = '/index.html';
+    }
+
+    // A. Serve imported game assets from OPFS
     if ((path.startsWith('/vcsky/') || path.startsWith('/vcbr/')) &&
         (event.request.method === 'GET' || event.request.method === 'HEAD')) {
         event.respondWith(serveFromOPFS(event.request, path));
         return;
     }
 
-    // B. Cache-First with Network Fallback for App Shell (HTML, JS, WASM)
+    // B. Handle origin requests (HTML, JS, WASM, CSS)
     if (event.request.method === 'GET' && url.origin === self.location.origin) {
         event.respondWith(
             caches.open(CACHE_NAME).then(async (cache) => {
-                // Check if file is already in SW Cache
-                const cachedResponse = await cache.match(event.request);
+                // Try serving from Cache Storage first
+                const cachedResponse = await cache.match(event.request) || await cache.match(path);
                 if (cachedResponse) {
                     return withIsolationHeaders(cachedResponse);
                 }
 
-                // If not cached, fetch from network and store it in SW Cache
+                // If not cached, fetch from network and store in Cache Storage
                 try {
                     const networkResponse = await fetch(event.request);
                     if (networkResponse.status === 200) {
@@ -107,6 +115,11 @@ self.addEventListener('fetch', (event) => {
                     }
                     return withIsolationHeaders(networkResponse);
                 } catch (error) {
+                    // Fallback to cached index.html for offline navigations
+                    const fallbackIndex = await cache.match('/index.html') || await cache.match('./index.html');
+                    if (fallbackIndex) {
+                        return withIsolationHeaders(fallbackIndex);
+                    }
                     return new Response('Offline resource not available', { status: 503 });
                 }
             })
@@ -144,4 +157,71 @@ function buildHeaders(filename, size) {
 }
 
 function parseRange(rangeHeader, size) {
-    const match = /^bytes=(\d*)-(\d
+    const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader || '');
+    if (!match) return null;
+
+    let start = match[1] === '' ? null : Number(match[1]);
+    let end = match[2] === '' ? null : Number(match[2]);
+
+    if (start === null && end === null) return null;
+    if (start === null) {
+        start = Math.max(0, size - end);
+        end = size - 1;
+    } else if (end === null || end >= size) {
+        end = size - 1;
+    }
+
+    if (start > end || start < 0 || end >= size) return null;
+    return { start, end };
+}
+
+async function serveFromOPFS(request, pathname) {
+    try {
+        const root = await navigator.storage.getDirectory();
+        const parts = pathname.replace(/^\//, '').split('/').map(decodeURIComponent);
+        let dir = root;
+        for (let i = 0; i < parts.length - 1; i++) {
+            dir = await dir.getDirectoryHandle(parts[i]);
+        }
+        const filename = parts[parts.length - 1];
+        const fileHandle = await dir.getFileHandle(filename);
+        const file = await fileHandle.getFile();
+        const headers = buildHeaders(filename, file.size);
+
+        if (request.method === 'HEAD') {
+            return new Response(null, { status: 200, headers });
+        }
+
+        const range = parseRange(request.headers.get('Range'), file.size);
+        if (range) {
+            headers.set('Content-Range', `bytes ${range.start}-${range.end}/${file.size}`);
+            headers.set('Content-Length', String(range.end - range.start + 1));
+            return new Response(file.slice(range.start, range.end + 1), {
+                status: 206,
+                headers,
+            });
+        }
+
+        return new Response(file, { status: 200, headers });
+    } catch (error) {
+        return new Response('Not found', { status: 404 });
+    }
+}
+
+self.addEventListener('message', async (event) => {
+    if (event.data.type === 'IS_READY') {
+        const ready = await isGameReady();
+        const port = event.ports[0] || event.source;
+        if (port) port.postMessage({ type: 'IS_READY', ready });
+    }
+});
+
+async function isGameReady() {
+    try {
+        const root = await navigator.storage.getDirectory();
+        await root.getFileHandle(OPFS_MARKER);
+        return true;
+    } catch {
+        return false;
+    }
+}
