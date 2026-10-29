@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "devDependencies": {
-    "vite": "^8.0.1"
+    "vite": "^8.0.1",
     "vite-plugin-pwa": "^0.21.1"
   },
   "packageManager": "pnpm@10.8.1",
