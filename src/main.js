@@ -642,6 +642,43 @@ function initLanguagePicker() {
   });
 }
 
+// Shows the game's debug log (written by game.js) on the setup page.
+function initDebugPanel() {
+  const panel = document.getElementById("debug-panel");
+  const output = document.getElementById("debug-log");
+  if (!panel || !output) return;
+  const render = () => {
+    let text = "";
+    try {
+      text = localStorage.getItem("vcsky.debug") || "";
+    } catch {
+      // storage unavailable
+    }
+    output.textContent = text || "(empty)";
+  };
+  render();
+  panel.addEventListener("toggle", render);
+  document.getElementById("debug-clear")?.addEventListener("click", () => {
+    try {
+      localStorage.removeItem("vcsky.debug");
+    } catch {
+      // storage unavailable
+    }
+    render();
+  });
+  document.getElementById("debug-copy")?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(output.textContent);
+    } catch {
+      const range = document.createRange();
+      range.selectNodeContents(output);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  });
+}
+
 async function boot() {
   splash.onManage(() => {
     leavingForSetup = true;
@@ -653,6 +690,7 @@ async function boot() {
     window.location.reload();
   });
   applyTranslations();
+  initDebugPanel();
   initLanguagePicker();
   initCanvasBindings();
   initOrientationLock();
