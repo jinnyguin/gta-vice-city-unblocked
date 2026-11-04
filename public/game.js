@@ -159,10 +159,32 @@ async function loadGame(data) {
     // The engine only reports settings changes at certain moments, so also save
     // the settings file (key bindings and other options) every few seconds and
     // whenever the app is backgrounded or closed.
+    let userFilesSyncing = false;
+    // Flushes the engine's user-files folder (saves, and the controls/settings
+    // file it keeps there) to IndexedDB. The engine only does this when a game
+    // is saved, so anything changed in the menus would otherwise be lost.
+    function persistUserFiles() {
+        // syncdone === 1 means the engine's own load from IndexedDB has finished;
+        // writing before that would overwrite the stored files with empty ones.
+        if (Module.syncdone !== 1 || userFilesSyncing) return;
+        try {
+            userFilesSyncing = true;
+            Module.FS.syncfs(false, (err) => {
+                userFilesSyncing = false;
+                if (err) console.log('persistUserFiles error:', err);
+            });
+        } catch (e) {
+            userFilesSyncing = false;
+            console.error('persistUserFiles error:', e);
+        }
+    }
     function startRevcIniAutosave() {
         if (revcIniAutosaveStarted) return;
         revcIniAutosaveStarted = true;
-        const save = () => Module.syncRevcIni();
+        const save = () => {
+            Module.syncRevcIni();
+            persistUserFiles();
+        };
         setInterval(save, 3000);
         window.addEventListener('pagehide', save);
         document.addEventListener('visibilitychange', () => {
@@ -187,8 +209,8 @@ async function loadGame(data) {
                     const used = path.node.usedBytes;
                     const bytes = typeof used === 'number' ? path.node.contents.subarray(0, used) : path.node.contents;
                     const text = textDecoder.decode(bytes);
-                    // Skip half-written or empty files so a good copy is never replaced.
-                    if (!text.includes('[Bindings]') || !text.endsWith('\n')) {
+                    // Skip empty or obviously broken files so a good copy is never replaced.
+                    if (text.length < 20 || !text.includes('[')) {
                         return;
                     }
                     if (text !== lastSyncedRevcIni) {
