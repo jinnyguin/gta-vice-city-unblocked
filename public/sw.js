@@ -1,11 +1,12 @@
-const CACHE_NAME = 'gtavc-app-v5';
+const CACHE_NAME = 'gtavc-app-v6';
 const OPFS_MARKER = '_game_ready';
 
 // Explicitly list all critical app files so they are cached during SW installation
 const PRECACHE_ASSETS = [
     '/',
     '/index.html',
-    '/manifest.json'
+    '/manifest.json',
+    '/splash-logo.png'
 ];
 
 const CONTENT_TYPES = new Map([
