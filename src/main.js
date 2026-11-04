@@ -402,7 +402,7 @@ async function initSetupFlow() {
     setStorageStatus("status.ready", "ready");
     setPlayAvailability(true);
     progress.style.display = "none";
-    return;
+    return true;
   }
 
   setStorageStatus("status.missing", "missing");
@@ -476,11 +476,22 @@ async function boot() {
     return;
   }
 
-  await initSetupFlow();
+  // True when the game is already stored in OPFS and ready to run.
+  const autoStart = await initSetupFlow();
   try {
     await loadLegacyScripts();
   } catch (err) {
     showScriptLoadError(err);
+    return;
+  }
+
+  // Game files are already saved locally, so skip the Start button.
+  if (autoStart && window.__gtaGameReady === true && typeof window.startGame === "function") {
+    try {
+      await window.startGame({ stopPropagation() {} });
+    } catch (err) {
+      console.error("[boot] autostart failed:", err);
+    }
   }
 }
 
