@@ -19,99 +19,114 @@
         background: #000;
       }
       #app-splash {
+        --logo: min(52vmin, 320px);
         position: fixed;
         inset: 0;
         z-index: 10000;
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 28px;
         background: #000;
         opacity: 1;
-        transition: opacity 0.5s ease;
+        transition: opacity 0.7s ease;
       }
       #app-splash.is-hidden {
         opacity: 0;
         pointer-events: none;
       }
       #app-splash .splash-logo {
-        width: min(52vmin, 320px);
-        height: auto;
+        width: var(--logo);
+        height: var(--logo);
+        object-fit: contain;
         user-select: none;
         -webkit-user-drag: none;
-        animation: splash-pulse 2.4s ease-in-out infinite;
+        animation: splash-in 0.6s ease both;
+        transition: transform 0.7s ease;
       }
-      #app-splash .splash-bar {
-        position: relative;
-        width: min(40vmin, 200px);
-        height: 3px;
-        overflow: hidden;
-        border-radius: 2px;
-        background: rgba(255, 255, 255, 0.12);
-        transition: opacity 0.25s ease;
+      #app-splash.is-hidden .splash-logo {
+        transform: scale(1.04);
       }
-      #app-splash .splash-bar-fill {
-        position: absolute;
-        top: 0;
-        left: 0;
-        height: 100%;
-        width: 0%;
-        border-radius: 2px;
-        background: linear-gradient(90deg, #ffffc0, #ff4193);
-        transition: width 0.3s ease;
-      }
-      #app-splash.is-indeterminate .splash-bar-fill {
-        width: 40%;
-        transition: none;
-        animation: splash-slide 1.2s ease-in-out infinite;
-      }
+      /* Only shown when the browser needs a tap to unlock audio. */
       #app-splash .splash-prompt {
-        min-height: 1.4em;
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: calc(50% + var(--logo) / 2 + 28px);
         margin: 0;
-        color: #fff;
+        text-align: center;
+        color: rgba(255, 255, 255, 0.7);
         font: 12pt sans-serif;
         opacity: 0;
         transition: opacity 0.3s ease;
       }
       #app-splash.is-prompt .splash-prompt {
         opacity: 1;
-        animation: splash-blink 1.6s ease-in-out infinite;
+        animation: splash-blink 1.8s ease-in-out infinite;
       }
-      #app-splash.is-prompt .splash-bar {
+      /* Quiet gear in the corner: opens the setup page (saves, skins). */
+      #app-splash .splash-manage {
+        position: absolute;
+        top: calc(env(safe-area-inset-top, 0px) + 10px);
+        right: calc(env(safe-area-inset-right, 0px) + 10px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.5);
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
         opacity: 0;
+        animation: splash-gear-in 0.6s ease 1s forwards;
+        transition: color 0.15s ease;
       }
-      @keyframes splash-pulse {
-        0%,
-        100% {
-          transform: scale(1);
+      #app-splash .splash-manage:hover,
+      #app-splash .splash-manage:active {
+        color: #fff;
+      }
+      #app-splash.is-launching .splash-manage {
+        animation: none;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s ease;
+      }
+      @keyframes splash-in {
+        from {
+          opacity: 0;
         }
-        50% {
-          transform: scale(1.03);
+        to {
+          opacity: 1;
         }
       }
-      @keyframes splash-slide {
-        0% {
-          transform: translateX(-100%);
+      @keyframes splash-gear-in {
+        from {
+          opacity: 0;
         }
-        100% {
-          transform: translateX(250%);
+        to {
+          opacity: 1;
         }
       }
       @keyframes splash-blink {
         0%,
         100% {
-          opacity: 1;
+          opacity: 0.7;
         }
         50% {
-          opacity: 0.45;
+          opacity: 0.3;
         }
       }
       @media (prefers-reduced-motion: reduce) {
         #app-splash .splash-logo,
-        #app-splash.is-indeterminate .splash-bar-fill,
+        #app-splash .splash-manage,
         #app-splash.is-prompt .splash-prompt {
           animation: none;
+        }
+        #app-splash .splash-manage {
+          opacity: 1;
         }
       }
     </style>
@@ -135,9 +150,20 @@
     data-state-scope-mode="0"
     data-state-scope-gun="0"
   >
-    <div id="app-splash" class="is-indeterminate" aria-hidden="true">
+    <div id="app-splash" class="is-indeterminate" aria-hidden="false">
+      <button
+        id="splash-manage"
+        class="splash-manage"
+        type="button"
+        aria-label="Saves &amp; mods"
+        title="Saves &amp; mods"
+      >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+      </button>
       <img class="splash-logo" src="/splash-logo.png" alt="" draggable="false" />
-      <div class="splash-bar"><div class="splash-bar-fill"></div></div>
       <p class="splash-prompt" id="splash-prompt"></p>
     </div>
 
