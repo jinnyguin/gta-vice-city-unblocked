@@ -153,12 +153,87 @@ function setStatus(text) {
     }
 };
 
+// ─── Debug log (shown on the setup page, under "Debug log") ──────
+const DEBUG_KEY = 'vcsky.debug';
+function dbg(message) {
+    try {
+        const lines = (localStorage.getItem(DEBUG_KEY) || '').split('\n').filter(Boolean);
+        lines.push(`${new Date().toISOString().slice(5, 19).replace('T', ' ')} ${message}`);
+        localStorage.setItem(DEBUG_KEY, lines.slice(-80).join('\n'));
+    } catch (e) {
+        // logging must never break the game
+    }
+}
+function bindingsOf(text) {
+    const map = {};
+    let inSection = false;
+    for (const raw of text.split(/\r?\n/)) {
+        const line = raw.trim();
+        if (line[0] === '[') {
+            inSection = line === '[Bindings]';
+            continue;
+        }
+        const eq = line.indexOf('=');
+        if (inSection && eq > 0) map[line.slice(0, eq)] = line.slice(eq + 1);
+    }
+    return map;
+}
+// Bindings in `text` that differ from the built-in defaults.
+function bindingDiff(text) {
+    const base = bindingsOf(revc_iniDefault);
+    const now = bindingsOf(text);
+    const out = [];
+    for (const key of new Set([...Object.keys(base), ...Object.keys(now)])) {
+        if (base[key] !== now[key]) out.push(`${key}=${now[key] ?? '(missing)'}`);
+    }
+    return out;
+}
+function describeDiff(text) {
+    const diff = bindingDiff(text);
+    return `${diff.length} binding(s) differ from default${diff.length ? ': ' + diff.slice(0, 4).join(' ; ') : ''}`;
+}
+
 async function loadGame(data) {
+    dbg('--- launch ---');
     let lastSyncedRevcIni = null;
+    let lastEngineSync = null;
     let revcIniAutosaveStarted = false;
     // The engine only reports settings changes at certain moments, so also save
     // the settings file (key bindings and other options) every few seconds and
     // whenever the app is backgrounded or closed.
+    // Copies the engine's settings file (key bindings and other options) into
+    // localStorage. `source` is 'engine' when the engine asked for it (right
+    // after it wrote the file) or 'timer' for the periodic check.
+    function syncRevcIni(source) {
+        try {
+            const path = Module.FS.lookupPath("/vc-assets/local/revc.ini");
+            if (!path || !path.node || !path.node.contents) {
+                if (source === 'engine') dbg('engine sync: revc.ini missing or empty in FS');
+                return;
+            }
+            // MEMFS can over-allocate its buffer, so only read the used bytes.
+            const used = path.node.usedBytes;
+            const bytes = typeof used === 'number' ? path.node.contents.subarray(0, used) : path.node.contents;
+            const text = textDecoder.decode(bytes);
+            if (source === 'engine') lastEngineSync = Date.now();
+            // Skip empty or obviously broken files so a good copy is never replaced.
+            if (text.length < 20 || !text.includes('[')) {
+                if (source === 'engine') dbg(`engine sync: skipped, file looks broken (${text.length}B)`);
+                return;
+            }
+            const changed = text !== lastSyncedRevcIni && text !== localStorage.getItem('vcsky.revc.ini');
+            if (text !== lastSyncedRevcIni) {
+                localStorage.setItem('vcsky.revc.ini', text);
+                lastSyncedRevcIni = text;
+            }
+            if (source === 'engine' || changed) {
+                dbg(`${source} sync: ${text.length}B, ${changed ? 'CHANGED' : 'unchanged'}, ${describeDiff(text)}`);
+            }
+        } catch (e) {
+            dbg(`${source} sync error: ${e && e.message}`);
+            console.error('syncRevcIni error:', e);
+        }
+    }
     let userFilesSyncing = false;
     // Flushes the engine's user-files folder (saves, and the controls/settings
     // file it keeps there) to IndexedDB. The engine only does this when a game
@@ -171,7 +246,7 @@ async function loadGame(data) {
             userFilesSyncing = true;
             Module.FS.syncfs(false, (err) => {
                 userFilesSyncing = false;
-                if (err) console.log('persistUserFiles error:', err);
+                if (err) { console.log('persistUserFiles error:', err); dbg(`flush error: ${err}`); }
             });
         } catch (e) {
             userFilesSyncing = false;
@@ -182,14 +257,30 @@ async function loadGame(data) {
         if (revcIniAutosaveStarted) return;
         revcIniAutosaveStarted = true;
         const save = () => {
-            Module.syncRevcIni();
+            syncRevcIni('timer');
             persistUserFiles();
         };
         setInterval(save, 3000);
         window.addEventListener('pagehide', save);
         document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'hidden') save();
+            if (document.visibilityState === 'hidden') {
+                dbg(`app hidden (last engine sync: ${lastEngineSync ? Math.round((Date.now() - lastEngineSync) / 1000) + 's ago' : 'never this launch'})`);
+                save();
+            }
         });
+        // Once the engine has set up its folders, record which settings files exist.
+        setTimeout(() => {
+            const list = (dir) => {
+                try {
+                    return Module.FS.readdir(dir).filter((n) => n !== '.' && n !== '..');
+                } catch (e) {
+                    return [`(${e && e.message})`];
+                }
+            };
+            const local = list('/vc-assets/local').filter((n) => /\.(ini|set|cfg|dat|txt)$/i.test(n) && !/^(gta|ped|car|weapon|object|water|default|handling|particle|timecyc|surface|fistfite|waterpro|pedstats|carcols|pedgrp|cull|info)/i.test(n));
+            dbg(`files in /vc-assets/local: ${local.join(', ') || '(none matching)'}`);
+            dbg(`files in userfiles: ${list('/vc-assets/local/userfiles').join(', ') || '(empty)'}`);
+        }, 8000);
     }
     var Module = {
         mainCalled: () => {
@@ -199,29 +290,10 @@ async function loadGame(data) {
             } catch (e) {
                 console.error('mainCalled error:', e);
             }
+            dbg(`start: ini given to engine ${revc_ini.length}B, cached=${localStorage.getItem('vcsky.revc.ini') ? 'yes' : 'no'}, ${describeDiff(revc_ini)}`);
             startRevcIniAutosave();
         },
-        syncRevcIni: () => {
-            try {
-                const path = Module.FS.lookupPath("/vc-assets/local/revc.ini");
-                if (path && path.node && path.node.contents) {
-                    // MEMFS can over-allocate its buffer, so only read the used bytes.
-                    const used = path.node.usedBytes;
-                    const bytes = typeof used === 'number' ? path.node.contents.subarray(0, used) : path.node.contents;
-                    const text = textDecoder.decode(bytes);
-                    // Skip empty or obviously broken files so a good copy is never replaced.
-                    if (text.length < 20 || !text.includes('[')) {
-                        return;
-                    }
-                    if (text !== lastSyncedRevcIni) {
-                        localStorage.setItem('vcsky.revc.ini', text);
-                        lastSyncedRevcIni = text;
-                    }
-                }
-            } catch (e) {
-                console.error('syncRevcIni error:', e);
-            }
-        },
+        syncRevcIni: () => syncRevcIni('engine'),
         preRun: [() => window.vcUserData?.installIntoFS(Module.FS)],
         postRun: [],
         print: (...args) => console.log(args.join(' ')),
