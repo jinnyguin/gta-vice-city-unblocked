@@ -10,6 +10,9 @@ import {
 
 const ASSET_RELEASE_URL = import.meta.env.VITE_ASSET_URL;
 
+// Set when the page is about to reload itself, so the splash stays up.
+let pageReloading = false;
+
 const BASE = import.meta.env.BASE_URL;
 
 const LEGACY_SCRIPT_SOURCES = [
@@ -80,6 +83,149 @@ async function loadLegacyScripts() {
   for (const src of LEGACY_SCRIPT_SOURCES) {
     await loadScript(src);
   }
+}
+
+// ─── Launch splash ────────────────────────────────────────────
+// The markup lives in index.html so it paints on the very first frame. It
+// stays up while the game autostarts (covering the setup page, the intro
+// video and the black gap before the first game frame) and fades out once
+// there is something real to show.
+const splash = (() => {
+  const el = document.getElementById("app-splash");
+  const fill = el?.querySelector(".splash-bar-fill");
+  const prompt = document.getElementById("splash-prompt");
+  let hidden = false;
+
+  return {
+    hide() {
+      if (!el || hidden) return;
+      hidden = true;
+      el.classList.add("is-hidden");
+      window.setTimeout(() => el.remove(), 700);
+    },
+    setProgress(percent) {
+      if (!el || !fill || hidden) return;
+      el.classList.remove("is-indeterminate");
+      fill.style.width = `${percent}%`;
+    },
+    setIndeterminate() {
+      if (!el || hidden) return;
+      el.classList.add("is-indeterminate");
+    },
+    showPrompt(text) {
+      if (!el || !prompt || hidden) return;
+      prompt.textContent = text;
+      el.classList.add("is-prompt");
+    },
+    clearPrompt() {
+      el?.classList.remove("is-prompt");
+    },
+  };
+})();
+
+// True when the browser lets audio start without a tap (for example an
+// installed PWA on Android). When it does, the "click to continue" step that
+// only exists to unlock audio can be skipped.
+async function canAutoplayAudio() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return false;
+  let context;
+  try {
+    context = new AudioContextClass();
+    if (context.state !== "running") {
+      await Promise.race([
+        context.resume().catch(() => {}),
+        new Promise((resolve) => window.setTimeout(resolve, 250)),
+      ]);
+    }
+    return context.state === "running";
+  } catch {
+    return false;
+  } finally {
+    context?.close().catch(() => {});
+  }
+}
+
+// Mirror the loader's download bar onto the splash.
+function mirrorLoaderProgress() {
+  const fillEl = document.querySelector("#spinner .progress-bar-fill");
+  if (!fillEl) return;
+  new MutationObserver(() => {
+    const percent = parseFloat(fillEl.style.width);
+    if (Number.isFinite(percent)) splash.setProgress(percent);
+  }).observe(fillEl, { attributes: true, attributeFilter: ["style"] });
+}
+
+// Keep the splash up after the game is launched until the engine is actually
+// running, then fade it out once a frame or two has been drawn.
+let watchingForGameStart = false;
+function hideSplashWhenGameRuns() {
+  if (watchingForGameStart) return;
+  watchingForGameStart = true;
+  const statusEl = document.getElementById("status");
+  let done = false;
+  let observer;
+
+  const finish = () => {
+    if (done) return;
+    done = true;
+    observer?.disconnect();
+    window.removeEventListener("error", finish);
+    splash.hide();
+  };
+
+  if (statusEl) {
+    observer = new MutationObserver(() => {
+      // The engine reports "Running..." right before its main loop starts.
+      if (!/^Running/i.test(statusEl.textContent || "")) return;
+      observer.disconnect();
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => window.setTimeout(finish, 350)),
+      );
+    });
+    observer.observe(statusEl, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  }
+
+  // Never leave the screen covered: show errors, and give up after a while.
+  window.addEventListener("error", finish);
+  window.setTimeout(finish, 45000);
+}
+
+async function autoStartGame() {
+  const intro = document.querySelector(".intro");
+  // The splash covers the intro video, so don't let its soundtrack play unseen.
+  if (intro) intro.muted = true;
+
+  mirrorLoaderProgress();
+
+  const [audioAllowed] = await Promise.all([
+    canAutoplayAudio(),
+    window.startGame({ stopPropagation() {} }),
+  ]);
+
+  // startGame has finished loading the data and is now waiting for a click
+  // (desktop) or pointerup (mobile) before launching the engine.
+  if (audioAllowed) {
+    hideSplashWhenGameRuns();
+    splash.setIndeterminate();
+    window.dispatchEvent(new Event("click"));
+    window.dispatchEvent(new Event("pointerup"));
+    return;
+  }
+
+  // Audio needs a real tap to unlock, so ask for it on the splash itself.
+  splash.showPrompt(t("loader.clickToContinue"));
+  const onContinue = () => {
+    hideSplashWhenGameRuns();
+    splash.clearPrompt();
+    splash.setIndeterminate();
+  };
+  window.addEventListener("click", onContinue, { once: true });
+  window.addEventListener("pointerup", onContinue, { once: true });
 }
 
 // Returns null if OK, or a string describing the failure reason.
@@ -367,6 +513,7 @@ async function initSetupFlow() {
 
     if (!navigator.serviceWorker.controller) {
       console.log("[setup] SW not yet controlling page — reloading...");
+      pageReloading = true;
       window.location.reload();
       return;
     }
@@ -473,26 +620,34 @@ async function boot() {
       errorBox.style.display = "block";
       setText(errorBox, "errors.missingFeatures", { features: missing.join(", ") });
     }
+    splash.hide();
     return;
   }
 
   // True when the game is already stored in OPFS and ready to run.
   const autoStart = await initSetupFlow();
+  if (pageReloading) return;
   try {
     await loadLegacyScripts();
   } catch (err) {
     showScriptLoadError(err);
+    splash.hide();
     return;
   }
 
   // Game files are already saved locally, so skip the Start button.
   if (autoStart && window.__gtaGameReady === true && typeof window.startGame === "function") {
     try {
-      await window.startGame({ stopPropagation() {} });
+      await autoStartGame();
     } catch (err) {
       console.error("[boot] autostart failed:", err);
+      splash.hide();
     }
+    return;
   }
+
+  // Setup screen is needed (no game saved yet, or something went wrong).
+  splash.hide();
 }
 
 // A script can fail to load right after a deploy, when the browser still has
