@@ -13,6 +13,21 @@ const ASSET_RELEASE_URL = import.meta.env.VITE_ASSET_URL;
 // Set when the page is about to reload itself, so the splash stays up.
 let pageReloading = false;
 
+// Set when the user taps the splash gear to reach saves/skins. The page
+// reloads once into the setup screen instead of autostarting the game.
+const SETUP_FLAG = "vc-open-setup";
+let leavingForSetup = false;
+
+function takeSetupFlag() {
+  try {
+    const requested = sessionStorage.getItem(SETUP_FLAG) === "1";
+    sessionStorage.removeItem(SETUP_FLAG);
+    return requested;
+  } catch {
+    return false;
+  }
+}
+
 const BASE = import.meta.env.BASE_URL;
 
 const LEGACY_SCRIPT_SOURCES = [
@@ -120,6 +135,21 @@ const splash = (() => {
     clearPrompt() {
       el?.classList.remove("is-prompt");
     },
+    // The game is launching, so the setup gear is no longer offered.
+    lockManage() {
+      el?.classList.add("is-launching");
+    },
+    onManage(handler) {
+      const button = document.getElementById("splash-manage");
+      if (!button) return;
+      // The engine launches on a window-level click/pointerup, so keep the
+      // gear's own taps from reaching it.
+      button.addEventListener("pointerup", (event) => event.stopPropagation());
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        handler();
+      });
+    },
   };
 })();
 
@@ -180,7 +210,7 @@ function hideSplashWhenGameRuns() {
       if (!/^Running/i.test(statusEl.textContent || "")) return;
       observer.disconnect();
       requestAnimationFrame(() =>
-        requestAnimationFrame(() => window.setTimeout(finish, 350)),
+        requestAnimationFrame(() => window.setTimeout(finish, 200)),
       );
     });
     observer.observe(statusEl, {
@@ -207,9 +237,18 @@ async function autoStartGame() {
     window.startGame({ stopPropagation() {} }),
   ]);
 
+  // Give the user a moment to reach the setup gear before the game launches
+  // by itself (a fast data load would otherwise skip straight past it).
+  if (audioAllowed) {
+    const grace = 2500 - performance.now();
+    if (grace > 0) await new Promise((resolve) => window.setTimeout(resolve, grace));
+  }
+  if (leavingForSetup) return;
+
   // startGame has finished loading the data and is now waiting for a click
   // (desktop) or pointerup (mobile) before launching the engine.
   if (audioAllowed) {
+    splash.lockManage();
     hideSplashWhenGameRuns();
     splash.setIndeterminate();
     window.dispatchEvent(new Event("click"));
@@ -220,6 +259,7 @@ async function autoStartGame() {
   // Audio needs a real tap to unlock, so ask for it on the splash itself.
   splash.showPrompt(t("loader.clickToContinue"));
   const onContinue = () => {
+    splash.lockManage();
     hideSplashWhenGameRuns();
     splash.clearPrompt();
     splash.setIndeterminate();
@@ -603,6 +643,15 @@ function initLanguagePicker() {
 }
 
 async function boot() {
+  splash.onManage(() => {
+    leavingForSetup = true;
+    try {
+      sessionStorage.setItem(SETUP_FLAG, "1");
+    } catch {
+      // storage unavailable: the reload below just autostarts again
+    }
+    window.location.reload();
+  });
   applyTranslations();
   initLanguagePicker();
   initCanvasBindings();
@@ -627,6 +676,7 @@ async function boot() {
   // True when the game is already stored in OPFS and ready to run.
   const autoStart = await initSetupFlow();
   if (pageReloading) return;
+  const openSetup = takeSetupFlag();
   try {
     await loadLegacyScripts();
   } catch (err) {
@@ -636,7 +686,13 @@ async function boot() {
   }
 
   // Game files are already saved locally, so skip the Start button.
-  if (autoStart && window.__gtaGameReady === true && typeof window.startGame === "function") {
+  if (
+    autoStart &&
+    !openSetup &&
+    !leavingForSetup &&
+    window.__gtaGameReady === true &&
+    typeof window.startGame === "function"
+  ) {
     try {
       await autoStartGame();
     } catch (err) {
