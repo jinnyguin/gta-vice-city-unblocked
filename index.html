@@ -359,6 +359,17 @@
             <input type="file" id="skin-file-input" accept=".bmp,.png,.jpg,.jpeg,.zip,image/bmp,image/png,image/jpeg,application/zip" multiple hidden />
           </details>
 
+          <details id="debug-panel" class="userdata-panel">
+            <summary><h2>Debug log</h2></summary>
+            <p class="userdata-note">
+              Records when the game saves its settings. If your controls don't
+              stick, copy this and send it over.
+            </p>
+            <pre id="debug-log" style="white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; font-size: 11px; text-align: left; user-select: text; -webkit-user-select: text;"></pre>
+            <button type="button" id="debug-copy" class="userdata-btn">Copy</button>
+            <button type="button" id="debug-clear" class="userdata-btn">Clear</button>
+          </details>
+
           <div
             id="config-panel"
           >
