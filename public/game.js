@@ -154,6 +154,21 @@ function setStatus(text) {
 };
 
 async function loadGame(data) {
+    let lastSyncedRevcIni = null;
+    let revcIniAutosaveStarted = false;
+    // The engine only reports settings changes at certain moments, so also save
+    // the settings file (key bindings and other options) every few seconds and
+    // whenever the app is backgrounded or closed.
+    function startRevcIniAutosave() {
+        if (revcIniAutosaveStarted) return;
+        revcIniAutosaveStarted = true;
+        const save = () => Module.syncRevcIni();
+        setInterval(save, 3000);
+        window.addEventListener('pagehide', save);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') save();
+        });
+    }
     var Module = {
         mainCalled: () => {
             try {
@@ -162,12 +177,24 @@ async function loadGame(data) {
             } catch (e) {
                 console.error('mainCalled error:', e);
             }
+            startRevcIniAutosave();
         },
         syncRevcIni: () => {
             try {
                 const path = Module.FS.lookupPath("/vc-assets/local/revc.ini");
                 if (path && path.node && path.node.contents) {
-                    localStorage.setItem('vcsky.revc.ini', textDecoder.decode(path.node.contents));
+                    // MEMFS can over-allocate its buffer, so only read the used bytes.
+                    const used = path.node.usedBytes;
+                    const bytes = typeof used === 'number' ? path.node.contents.subarray(0, used) : path.node.contents;
+                    const text = textDecoder.decode(bytes);
+                    // Skip half-written or empty files so a good copy is never replaced.
+                    if (!text.includes('[Bindings]') || !text.endsWith('\n')) {
+                        return;
+                    }
+                    if (text !== lastSyncedRevcIni) {
+                        localStorage.setItem('vcsky.revc.ini', text);
+                        lastSyncedRevcIni = text;
+                    }
                 }
             } catch (e) {
                 console.error('syncRevcIni error:', e);
