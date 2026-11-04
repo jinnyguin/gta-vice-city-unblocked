@@ -11,7 +11,110 @@
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta name="theme-color" content="#05060a" />
+    <link rel="preload" as="image" href="/splash-logo.png" />
     <link rel="stylesheet" href="/src/style.css" />
+    <style>
+      /* Launch splash. Inline so it paints before anything else loads. */
+      html {
+        background: #000;
+      }
+      #app-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 28px;
+        background: #000;
+        opacity: 1;
+        transition: opacity 0.5s ease;
+      }
+      #app-splash.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #app-splash .splash-logo {
+        width: min(52vmin, 320px);
+        height: auto;
+        user-select: none;
+        -webkit-user-drag: none;
+        animation: splash-pulse 2.4s ease-in-out infinite;
+      }
+      #app-splash .splash-bar {
+        position: relative;
+        width: min(40vmin, 200px);
+        height: 3px;
+        overflow: hidden;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.12);
+        transition: opacity 0.25s ease;
+      }
+      #app-splash .splash-bar-fill {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 100%;
+        width: 0%;
+        border-radius: 2px;
+        background: linear-gradient(90deg, #ffffc0, #ff4193);
+        transition: width 0.3s ease;
+      }
+      #app-splash.is-indeterminate .splash-bar-fill {
+        width: 40%;
+        transition: none;
+        animation: splash-slide 1.2s ease-in-out infinite;
+      }
+      #app-splash .splash-prompt {
+        min-height: 1.4em;
+        margin: 0;
+        color: #fff;
+        font: 12pt sans-serif;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+      #app-splash.is-prompt .splash-prompt {
+        opacity: 1;
+        animation: splash-blink 1.6s ease-in-out infinite;
+      }
+      #app-splash.is-prompt .splash-bar {
+        opacity: 0;
+      }
+      @keyframes splash-pulse {
+        0%,
+        100% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(1.03);
+        }
+      }
+      @keyframes splash-slide {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(250%);
+        }
+      }
+      @keyframes splash-blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.45;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #app-splash .splash-logo,
+        #app-splash.is-indeterminate .splash-bar-fill,
+        #app-splash.is-prompt .splash-prompt {
+          animation: none;
+        }
+      }
+    </style>
   </head>
 
   <body
@@ -32,6 +135,12 @@
     data-state-scope-mode="0"
     data-state-scope-gun="0"
   >
+    <div id="app-splash" class="is-indeterminate" aria-hidden="true">
+      <img class="splash-logo" src="/splash-logo.png" alt="" draggable="false" />
+      <div class="splash-bar"><div class="splash-bar-fill"></div></div>
+      <p class="splash-prompt" id="splash-prompt"></p>
+    </div>
+
     <div class="rotate-overlay">
       <span class="rotate-overlay-icon">&#8635;</span>
       <span data-i18n="rotate">Rotate your device</span>
