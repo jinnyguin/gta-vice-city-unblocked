@@ -359,6 +359,19 @@
             <input type="file" id="skin-file-input" accept=".bmp,.png,.jpg,.jpeg,.zip,image/bmp,image/png,image/jpeg,application/zip" multiple hidden />
           </details>
 
+          <details id="controls-mod-panel" class="userdata-panel">
+            <summary><h2>Controls mod</h2></summary>
+            <p class="userdata-note">
+              Keyboard and mouse bindings that load automatically every time
+              the game starts. Use the same names as the defaults, for example
+              <code>kbd:UP,2ndKbd:W</code> or <code>mouse:LEFT</code>. Changed
+              rows are outlined in pink.
+            </p>
+            <div id="controls-mod-status" class="userdata-status" role="status" hidden></div>
+            <ul id="controls-mod-list"></ul>
+            <button type="button" id="controls-mod-reset" class="userdata-btn">Reset all to default</button>
+          </details>
+
           <details id="debug-panel" class="userdata-panel">
             <summary><h2>Debug log</h2></summary>
             <p class="userdata-note">
