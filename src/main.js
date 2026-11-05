@@ -36,6 +36,7 @@ const LEGACY_SCRIPT_SOURCES = [
   `${BASE}shared.js`,
   `${BASE}saves.js`,
   `${BASE}skins.js`,
+  `${BASE}controls-mod.js`,
   `${BASE}game.js`,
 ];
 
