@@ -284,13 +284,20 @@ async function loadGame(data) {
     }
     var Module = {
         mainCalled: () => {
+            // Controls mod: write the saved key/mouse bindings into the settings.
+            let iniForEngine = revc_ini;
+            try {
+                if (window.vcControlsMod) iniForEngine = window.vcControlsMod.apply(revc_ini);
+            } catch (e) {
+                console.error('controls mod error:', e);
+            }
             try {
                 Module.FS.unlink("/vc-assets/local/revc.ini");
-                Module.FS.createDataFile("/vc-assets/local/revc.ini", 0, revc_ini, revc_ini.length);
+                Module.FS.createDataFile("/vc-assets/local/revc.ini", 0, iniForEngine, iniForEngine.length);
             } catch (e) {
                 console.error('mainCalled error:', e);
             }
-            dbg(`start: ini given to engine ${revc_ini.length}B, cached=${localStorage.getItem('vcsky.revc.ini') ? 'yes' : 'no'}, ${describeDiff(revc_ini)}`);
+            dbg(`start: ini given to engine ${iniForEngine.length}B, cached=${localStorage.getItem('vcsky.revc.ini') ? 'yes' : 'no'}, ${describeDiff(iniForEngine)}`);
             startRevcIniAutosave();
         },
         syncRevcIni: () => syncRevcIni('engine'),
