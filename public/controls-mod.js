@@ -53,6 +53,57 @@
   ];
   const DEFAULT_MAP = new Map(DEFAULTS);
 
+  // Control scheme: "" keeps whatever the game already has, "0" is Standard
+  // and "1" is Classic (the engine's [Controller] Method setting).
+  const SCHEME_KEY = "vcsky.mod.controlScheme";
+  const SCHEMES = [
+    ["", "Keep game setting"],
+    ["0", "Standard"],
+    ["1", "Classic"],
+  ];
+
+  function loadScheme() {
+    try {
+      const value = localStorage.getItem(SCHEME_KEY) || "";
+      return SCHEMES.some(([id]) => id === value) ? value : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function saveScheme(value) {
+    try {
+      localStorage.setItem(SCHEME_KEY, value);
+    } catch {
+      // storage unavailable
+    }
+  }
+
+  // Sets `key=value` inside `[section]` of the ini lines, adding the key or the
+  // whole section if needed.
+  function setIniValue(lines, section, key, value) {
+    const header = `[${section}]`;
+    let start = lines.findIndex((line) => line.trim() === header);
+    if (start < 0) {
+      lines.push("", header);
+      start = lines.length - 1;
+    }
+    let end = lines.length;
+    for (let i = start + 1; i < lines.length; i++) {
+      if (lines[i].trim().startsWith("[")) {
+        end = i;
+        break;
+      }
+    }
+    for (let i = start + 1; i < end; i++) {
+      if (lines[i].split("=")[0].trim() === key) {
+        lines[i] = `${key}=${value}`;
+        return;
+      }
+    }
+    lines.splice(end, 0, `${key}=${value}`);
+  }
+
   function loadOverrides() {
     try {
       const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || "{}");
@@ -86,9 +137,18 @@
     const names = Object.keys(overrides).filter(
       (name) => DEFAULT_MAP.has(name) && isValid(overrides[name]),
     );
-    if (!names.length) return iniText;
+    const scheme = loadScheme();
+    if (!names.length && !scheme) return iniText;
 
     const lines = iniText.split("\n");
+    if (scheme) {
+      setIniValue(lines, "Controller", "Method", scheme);
+      if (typeof dbg === "function") {
+        dbg(`controls mod: control scheme ${scheme === "1" ? "Classic" : "Standard"}`);
+      }
+    }
+    if (!names.length) return lines.join("\n");
+
     let start = lines.findIndex((line) => line.trim() === "[Bindings]");
     if (start < 0) {
       lines.push("", "[Bindings]");
@@ -161,6 +221,30 @@
 
     const overrides = loadOverrides();
     const rows = new Map();
+
+    // Control scheme selector (Standard / Classic)
+    const schemeRow = document.createElement("div");
+    schemeRow.className = "cm-row";
+    schemeRow.style.marginBottom = "8px";
+    const schemeLabel = document.createElement("span");
+    schemeLabel.className = "cm-name";
+    schemeLabel.textContent = "Control scheme";
+    const schemeSelect = document.createElement("select");
+    schemeSelect.className = "cm-input";
+    schemeSelect.setAttribute("aria-label", "Control scheme");
+    for (const [id, text] of SCHEMES) {
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = text;
+      schemeSelect.appendChild(option);
+    }
+    schemeSelect.value = loadScheme();
+    schemeSelect.addEventListener("change", () => {
+      saveScheme(schemeSelect.value);
+      setStatus("Saved. Applied the next time the game starts.");
+    });
+    schemeRow.append(schemeLabel, schemeSelect);
+    list.parentNode.insertBefore(schemeRow, list);
 
     const refresh = (name) => {
       const row = rows.get(name);
